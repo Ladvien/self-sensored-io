@@ -1,0 +1,1 @@
+AWS_PROFILE=personal TABLE=house_codex cargo lambda watch -a 127.0.0.1 -p 9001
