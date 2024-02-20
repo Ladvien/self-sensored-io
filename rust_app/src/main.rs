@@ -1,7 +1,7 @@
 use dotenv::dotenv;
 use lambda_http::{service_fn, Error, Request};
 use self_sensored_io::{create_table, record_activity};
-use std::env;
+use std::{env, process::Output};
 mod models;
 
 /// Main function
@@ -16,13 +16,16 @@ async fn main() -> Result<(), Error> {
 
     // Create a DynamoDB client and create the table if it doesn't exist
     let dynamodb_client = aws_sdk_dynamodb::Client::new(&config);
-    create_table(&dynamodb_client, &table_name).await?;
+    // create_table(&dynamodb_client, &table_name).await?;
 
     // Register the Lambda handler
-    lambda_http::run(service_fn(|request: Request| {
-        record_activity(&dynamodb_client, &table_name, request)
+    let response = lambda_http::run(service_fn(|request: Request| {
+        let output = record_activity(&dynamodb_client, &table_name, requestlet).await;
+        Ok(())
     }))
     .await?;
+
+    println!("Response: {:?}", response);
 
     Ok(())
 }

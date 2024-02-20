@@ -75,6 +75,7 @@ pub async fn record_activity(
         Body::Text(body) => body.clone(),
         Body::Binary(body) => String::from_utf8_lossy(body).to_string(),
     };
+
     let activity = ActivityRequestBody::from_body(&body)?.to_activity();
     let response = activity.save_to_dynamodb(client, table_name).await;
 

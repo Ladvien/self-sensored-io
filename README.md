@@ -1,8 +1,6 @@
 # self-sensored-io
 WHERE I LEFT OFF:
-1. Map activity to item. Maybe move to .save() method on Activity
-2. Create a base API Gateway Proxy Request struct. Figure out how to make it is DRY as possible.
-3. The `put` endpoint needs to check if the item exists, and update it, otherwise, save it.
+1. I need to figure out how to propogate errors to a place where they may be logged in CloudWatch.  See https://github.com/awslabs/aws-lambda-rust-runtime/issues/348
 
 # DynamoDB Rust Operations
 https://docs.rs/aws-sdk-dynamodb/latest/aws_sdk_dynamodb/operation/index.html

@@ -40,7 +40,9 @@ pub struct ActivityRequestBody {
 
 impl ActivityRequestBody {
     pub fn from_body(body: &str) -> Result<ActivityRequestBody, serde_json::Error> {
-        serde_json::from_str::<ActivityRequestBody>(body)
+        let result = serde_json::from_str::<ActivityRequestBody>(body);
+        println!("result: {:?}", result);
+        result
     }
 
     pub fn to_activity(&self) -> Activity {
