@@ -24,3 +24,18 @@ https://github.com/aws/aws-sam-cli/issues/6668
 
 The Python version finally worked for me.
 https://docs.aws.amazon.com/serverless-application-model/latest/developerguide/manage-sam-cli-versions.html#manage-sam-cli-versions-install-virtual
+
+## Error Propogation Issues
+
+
+## Cargo Lambda
+https://www.cargo-lambda.info/
+
+## Multiple Endpoints
+https://github.com/awslabs/aws-lambda-rust-runtime/issues/362
+https://github.com/awslabs/aws-lambda-rust-runtime/issues/228
+https://github.com/awslabs/aws-lambda-rust-runtime/issues/29#issuecomment-444421031
+
+### With Axum
+https://github.com/awslabs/aws-lambda-rust-runtime/blob/main/examples/http-axum-middleware/src/main.rs
+https://github.com/tokio-rs/axum
