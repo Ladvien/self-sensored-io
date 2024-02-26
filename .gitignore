@@ -244,3 +244,5 @@ $RECYCLE.BIN/
 
 rust_app/target/
 venv/
+
+test_data.json
