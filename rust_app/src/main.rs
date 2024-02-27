@@ -1,5 +1,6 @@
 mod models;
 
+use axum::extract::DefaultBodyLimit;
 use axum::routing::{post, put};
 use axum::{response::Json, Router};
 use dotenv::dotenv;
@@ -24,6 +25,12 @@ async fn main() -> Result<(), Error> {
     // Create a DynamoDB client and create the table if it doesn't exist
     let dynamodb_client = aws_sdk_dynamodb::Client::new(&config);
 
+    // Load file test_data.json
+    // let file = std::fs::read_to_string("../test_data.json").unwrap();
+    // let data: Root = serde_json::from_str(&file).unwrap();
+    // println!("data: {:#?}", data);
+    // Convert to Root struct
+
     // Register the Lambda handler
     // set_var("AWS_LAMBDA_HTTP_IGNORE_STAGE_IN_PATH", "false");
 
@@ -36,23 +43,24 @@ async fn main() -> Result<(), Error> {
     //     .without_time()
     //     .init();
 
-    let app = Router::new().route("/store/:id", post(handler_sample));
+    let app = Router::new()
+        .route("/store/:id", post(handler_sample))
+        .layer(DefaultBodyLimit::disable());
 
     run(app).await
 }
 
 async fn handler_sample(body: Json<Value>) -> Json<Value> {
-    println!("body: {:#?}", body);
     let response = Json(json!({ "echo":  *body }));
-    // let test = serde_json::from_value::<AutoHealthExportPacket>(body.0.clone()).unwrap();
-    // print!("test: {:#?}", test);
-    let body = serde_json::from_str::<Data>(&body.to_string()).unwrap();
-    println!("body: {:#?}", body);
+    let packet = serde_json::from_str::<AutoHealthPacket>(&body.to_string()).unwrap();
+
+    // TODO-Left off: Store the packet in DynamoDB
+
     response
 }
 
 #[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct Root {
+pub struct AutoHealthPacket {
     pub data: Data,
 }
 

@@ -39,3 +39,7 @@ https://github.com/awslabs/aws-lambda-rust-runtime/issues/29#issuecomment-444421
 ### With Axum
 https://github.com/awslabs/aws-lambda-rust-runtime/blob/main/examples/http-axum-middleware/src/main.rs
 https://github.com/tokio-rs/axum
+
+## Serde DynamoDB
+For easy recording of incoming items:
+https://github.com/zenlist/serde_dynamo
