@@ -1,5 +1,7 @@
 mod models;
 
+use aws_sdk_dynamodb::operation::put_item::PutItemOutput;
+use aws_sdk_dynamodb::types::{AttributeValue, ReturnValuesOnConditionCheckFailure};
 use axum::extract::DefaultBodyLimit;
 use axum::routing::{post, put};
 use axum::{response::Json, Router};
@@ -11,6 +13,9 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 use serde_json::Value;
 use std::env::{self};
+use std::{future, vec};
+use tokio::task::{futures, JoinSet};
+use tokio::{join, try_join};
 
 /// Main function
 #[tokio::main]
@@ -50,18 +55,98 @@ async fn main() -> Result<(), Error> {
     run(app).await
 }
 
-async fn handler_sample(body: Json<Value>) -> Json<Value> {
-    let response = Json(json!({ "echo":  *body }));
+async fn handler_sample(body: Json<Value>) -> Json<()> {
+    let table_name = env::var("TABLE_NAME").unwrap();
+
+    // Create a DynamoDB client and create the table if it doesn't exist
+    let config = aws_config::load_from_env().await;
+    let dynamodb_client = aws_sdk_dynamodb::Client::new(&config);
+    // let response = Json(json!({ "echo":  *body }));
     let packet = serde_json::from_str::<AutoHealthPacket>(&body.to_string()).unwrap();
 
     // TODO-Left off: Store the packet in DynamoDB
+    let response = packet
+        .save_to_dynamodb(&dynamodb_client, &table_name)
+        .await
+        .unwrap();
 
-    response
+    println!("response: {:?}", response);
+    Json(())
 }
 
 #[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct AutoHealthPacket {
     pub data: Data,
+}
+
+// impl Activity {
+//     pub async fn save_to_dynamodb(
+//         &self,
+//         client: &aws_sdk_dynamodb::Client,
+//         table_name: &str,
+//     ) -> Result<PutItemOutput, aws_sdk_dynamodb::Error> {
+//         let response = client
+//             .put_item()
+//             .table_name(table_name)
+//             .item("id", AttributeValue::S(self.id.clone()))
+//             .item("datetime", AttributeValue::S(self.datetime.clone()))
+//             .item("measurement", AttributeValue::S(self.measurement.clone()))
+//             .item("unit", AttributeValue::S(self.unit.clone()))
+//             .item("subject", AttributeValue::S(self.subject.clone()))
+//             .condition_expression("attribute_not_exists(id)")
+//             .return_values_on_condition_check_failure(ReturnValuesOnConditionCheckFailure::AllOld)
+//             .send()
+//             .await?;
+
+//         Ok(response)
+//     }
+// }
+
+impl AutoHealthPacket {
+    pub async fn save_to_dynamodb(
+        &self,
+        client: &aws_sdk_dynamodb::Client,
+        table_name: &str,
+    ) -> Result<Vec<PutItemOutput>, Error> {
+        // let mut responses = vec![];
+        let mut handles = vec![];
+
+        self.data.workouts.iter().for_each(|workout| {
+            let uuid = uuid::Uuid::new_v4().to_string();
+            let datetime = chrono::Utc::now().to_rfc3339();
+
+            let future = client
+                .put_item()
+                .table_name(table_name)
+                .item("id", AttributeValue::S(uuid.clone()))
+                .item("datetime", AttributeValue::S(datetime.clone()))
+                .item(
+                    "workout",
+                    AttributeValue::S(serde_json::to_string(workout).unwrap()),
+                )
+                .condition_expression("attribute_not_exists(id)")
+                .return_values_on_condition_check_failure(
+                    ReturnValuesOnConditionCheckFailure::AllOld,
+                )
+                .send();
+
+            handles.push(tokio::spawn(future));
+        });
+
+        let mut results: Vec<PutItemOutput> = vec![];
+
+        for handle in handles {
+            match handle.await.unwrap() {
+                Ok(result) => results.push(result),
+                Err(e) => {
+                    println!("Error: {:?}", e);
+                    return Err(Error::from(e));
+                }
+            }
+        }
+
+        Ok(results)
+    }
 }
 
 #[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
