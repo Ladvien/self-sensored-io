@@ -1,6 +1,8 @@
 # self-sensored-io
 WHERE I LEFT OFF:
-1. I need to figure out how to propogate errors to a place where they may be logged in CloudWatch.  See https://github.com/awslabs/aws-lambda-rust-runtime/issues/348
+1. Need to revise how much data is being loaded into a single Dynamo attribute cell.
+2. Need to reshape the results to be confirmed by the requester.
+
 
 # DynamoDB Rust Operations
 https://docs.rs/aws-sdk-dynamodb/latest/aws_sdk_dynamodb/operation/index.html
@@ -43,3 +45,66 @@ https://github.com/tokio-rs/axum
 ## Serde DynamoDB
 For easy recording of incoming items:
 https://github.com/zenlist/serde_dynamo
+
+
+## Auto Health Format
+https://github.com/Lybron/health-auto-export/wiki/API-Export---JSON-Format
+
+## Creating Rust Structs from JSON
+https://github.com/Lybron/health-auto-export/wiki/API-Export---JSON-Format#json-format
+
+# Data Schema
+![apple-healt-erd](./assets/apple_health.png)
+
+```
+Table apple_health_data {
+  id int
+  ref_metric int
+  ref_workout int [ref: > workouts.id ]
+}
+
+Table workouts {
+  id int
+  ref_measurement_id int [ref: > measurements.id]
+  ref_heart_rate_data_id int
+  ref_heart_rate_recovery_id int
+  ref_route_id int
+  ref_elevation_id int
+}
+
+Table measurements {
+  id int
+  name char
+  start datetime
+  end datetime
+  qty float
+  units enum
+}
+
+Table heart_rate_recoveries {
+  id int
+  date datetime
+  ref_workout_id int [ref: > workouts.id]
+  // ref_measurement_id int [ref: > measurements.id]
+}
+
+Table heart_rate_dates {
+  id int
+  date datetime
+  ref_workout_id int [ref: > workouts.id]
+  // ref_measurement_id int [ref: > measurements.id]
+}
+
+Table routes {
+  id int
+  date datetime
+  ref_workout_id int [ref: > workouts.id]
+  // ref_measurement_id int [ref: > measurements.id]
+}
+
+Table elevation {
+  id int
+  ref_workout_id int [ref: > workouts.id]
+  // ref_measurement_id int [ref: > measurements.id] 
+}
+```
