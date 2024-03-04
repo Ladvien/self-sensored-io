@@ -115,22 +115,24 @@ impl AutoHealthPacket {
             let uuid = uuid::Uuid::new_v4().to_string();
             let datetime = chrono::Utc::now().to_rfc3339();
 
-            let future = client
-                .put_item()
-                .table_name(table_name)
-                .item("id", AttributeValue::S(uuid.clone()))
-                .item("datetime", AttributeValue::S(datetime.clone()))
-                .item(
-                    "workout",
-                    AttributeValue::S(serde_json::to_string(workout).unwrap()),
-                )
-                .condition_expression("attribute_not_exists(id)")
-                .return_values_on_condition_check_failure(
-                    ReturnValuesOnConditionCheckFailure::AllOld,
-                )
-                .send();
+            println!("workout: {:#?}", workout);
 
-            handles.push(tokio::spawn(future));
+            // let future = client
+            //     .put_item()
+            //     .table_name(table_name)
+            //     .item("id", AttributeValue::S(uuid.clone()))
+            //     .item("datetime", AttributeValue::S(datetime.clone()))
+            //     .item(
+            //         "workout",
+            //         AttributeValue::S(serde_json::to_string(workout).unwrap()),
+            //     )
+            //     .condition_expression("attribute_not_exists(id)")
+            //     .return_values_on_condition_check_failure(
+            //         ReturnValuesOnConditionCheckFailure::AllOld,
+            //     )
+            //     .send();
+
+            // handles.push(tokio::spawn(future));
         });
 
         let mut results: Vec<PutItemOutput> = vec![];
@@ -183,6 +185,20 @@ pub struct Workout {
     pub start: String,
     pub temperature: Temperature,
     pub distance: Option<Distance>,
+}
+
+enum ActivityWrapper {
+    StepCount(StepCount),
+    HeartRateRecovery(HeartRateRecovery),
+    WalkingAndRunningDistance(WalkingAndRunningDistance),
+    HeartRateDaum(HeartRateDaum),
+    ElevationUp(ElevationUp),
+    ActiveEnergy(ActiveEnergy),
+    Humidity(Humidity),
+    Route(Route),
+    Intensity(Intensity),
+    Temperature(Temperature),
+    Distance(Distance),
 }
 
 #[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
