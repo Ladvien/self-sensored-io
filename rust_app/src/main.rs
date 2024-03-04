@@ -1,21 +1,15 @@
 mod models;
 
-use aws_sdk_dynamodb::operation::put_item::PutItemOutput;
-use aws_sdk_dynamodb::types::{AttributeValue, ReturnValuesOnConditionCheckFailure};
 use axum::extract::DefaultBodyLimit;
-use axum::routing::{post, put};
+use axum::routing::post;
 use axum::{response::Json, Router};
 use dotenv::dotenv;
 use lambda_http::run;
-use lambda_http::{service_fn, Error, Request};
-use self_sensored_io::{create_table, record_activity};
+use lambda_http::Error;
+use self_sensored_io::models::record;
 use serde::{Deserialize, Serialize};
-use serde_json::json;
-use serde_json::Value;
+use serde_json::{json, Value};
 use std::env::{self};
-use std::{future, vec};
-use tokio::task::{futures, JoinSet};
-use tokio::{join, try_join};
 
 /// Main function
 #[tokio::main]
@@ -55,7 +49,7 @@ async fn main() -> Result<(), Error> {
     run(app).await
 }
 
-async fn handler_sample(body: Json<Value>) -> Json<()> {
+async fn handler_sample(body: Json<Value>) -> Json<Value> {
     let table_name = env::var("TABLE_NAME").unwrap();
 
     // Create a DynamoDB client and create the table if it doesn't exist
@@ -65,94 +59,212 @@ async fn handler_sample(body: Json<Value>) -> Json<()> {
     let packet = serde_json::from_str::<AutoHealthPacket>(&body.to_string()).unwrap();
 
     // TODO-Left off: Store the packet in DynamoDB
-    let response = packet
-        .save_to_dynamodb(&dynamodb_client, &table_name)
-        .await
-        .unwrap();
-
-    println!("response: {:?}", response);
-    Json(())
-}
-
-#[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct AutoHealthPacket {
-    pub data: Data,
-}
-
-// impl Activity {
-//     pub async fn save_to_dynamodb(
-//         &self,
-//         client: &aws_sdk_dynamodb::Client,
-//         table_name: &str,
-//     ) -> Result<PutItemOutput, aws_sdk_dynamodb::Error> {
-//         let response = client
-//             .put_item()
-//             .table_name(table_name)
-//             .item("id", AttributeValue::S(self.id.clone()))
-//             .item("datetime", AttributeValue::S(self.datetime.clone()))
-//             .item("measurement", AttributeValue::S(self.measurement.clone()))
-//             .item("unit", AttributeValue::S(self.unit.clone()))
-//             .item("subject", AttributeValue::S(self.subject.clone()))
-//             .condition_expression("attribute_not_exists(id)")
-//             .return_values_on_condition_check_failure(ReturnValuesOnConditionCheckFailure::AllOld)
-//             .send()
-//             .await?;
-
-//         Ok(response)
-//     }
-// }
-
-impl AutoHealthPacket {
-    pub async fn save_to_dynamodb(
-        &self,
-        client: &aws_sdk_dynamodb::Client,
-        table_name: &str,
-    ) -> Result<Vec<PutItemOutput>, Error> {
-        // let mut responses = vec![];
-        let mut handles = vec![];
-
-        self.data.workouts.iter().for_each(|workout| {
-            let uuid = uuid::Uuid::new_v4().to_string();
-            let datetime = chrono::Utc::now().to_rfc3339();
-
-            println!("workout: {:#?}", workout);
-
-            // let future = client
-            //     .put_item()
-            //     .table_name(table_name)
-            //     .item("id", AttributeValue::S(uuid.clone()))
-            //     .item("datetime", AttributeValue::S(datetime.clone()))
-            //     .item(
-            //         "workout",
-            //         AttributeValue::S(serde_json::to_string(workout).unwrap()),
-            //     )
-            //     .condition_expression("attribute_not_exists(id)")
-            //     .return_values_on_condition_check_failure(
-            //         ReturnValuesOnConditionCheckFailure::AllOld,
-            //     )
-            //     .send();
-
-            // handles.push(tokio::spawn(future));
-        });
-
-        let mut results: Vec<PutItemOutput> = vec![];
-
-        for handle in handles {
-            match handle.await.unwrap() {
-                Ok(result) => results.push(result),
-                Err(e) => {
-                    println!("Error: {:?}", e);
-                    return Err(Error::from(e));
-                }
-            }
-        }
-
-        Ok(results)
+    match packet.to_record() {
+        Ok(record) => Json(json!({ "echo": record })),
+        Err(e) => Json(json!({ "error": e.to_string() })),
     }
 }
 
 #[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct Data {
+pub struct AutoHealthPacket {
+    pub data: AppleHealthData,
+}
+
+impl AutoHealthPacket {
+    pub fn to_record(&self) -> Result<AppleHealthDataRecord, Error> {
+        let mut workout_records = Vec::new();
+        let mut metric_records = Vec::new();
+        let mut route_records = Vec::new();
+
+        self.data.workouts.iter().for_each(|workout| {
+            let unique_str = format!(
+                "{}{}{}{}{}{}",
+                workout.name,
+                workout.start,
+                workout.end,
+                workout.intensity.qty,
+                workout.intensity.units,
+                workout.location
+            );
+            let workout_id = uuid::Uuid::parse_str(&unique_str).unwrap();
+
+            let workout_record = WorkoutRecord {
+                id: workout_id.clone(),
+                name: workout.name.clone(),
+                start: workout.start.clone(),
+                end: workout.end.clone(),
+                intensity: workout.intensity.clone(),
+                duration: workout.duration,
+                location: workout.location.clone(),
+                recorded_at: chrono::Utc::now().to_rfc3339(),
+            };
+
+            workout_records.push(workout_record);
+
+            let recorded_at = chrono::Utc::now().to_rfc3339();
+
+            // StepCounts
+            if workout.step_count.len() > 0 {
+                for step_count in &workout.step_count {
+                    let measurement = MeasurementRecord {
+                        id: uuid::Uuid::new_v4(),
+                        workout_id: workout_id.to_string(),
+                        name: "step_count".to_string(),
+                        occurrence_date: Some(step_count.date.clone()),
+                        start: None,
+                        end: None,
+                        qty: step_count.qty,
+                        units: "steps".to_string(),
+                        recorded_at: recorded_at.clone(),
+                    };
+
+                    metric_records.push(measurement);
+                }
+            }
+
+            // HeartRateRecovery
+            if workout.heart_rate_data.len() > 0 {
+                for heart_rate_data in &workout.heart_rate_data {
+                    let heart_rate_data = MeasurementRecord {
+                        id: uuid::Uuid::new_v4(),
+                        workout_id: workout_id.to_string(),
+                        name: "heart_rate_data".to_string(),
+                        occurrence_date: Some(heart_rate_data.date.clone()),
+                        start: None,
+                        end: None,
+                        qty: heart_rate_data.avg,
+                        units: "bpm".to_string(),
+                        recorded_at: recorded_at.clone(),
+                    };
+
+                    metric_records.push(heart_rate_data);
+                }
+            }
+
+            // WalkingAndRunningDistance
+            if workout.walking_and_running_distance.len() > 0 {
+                for distance in &workout.walking_and_running_distance {
+                    let distance = MeasurementRecord {
+                        id: uuid::Uuid::new_v4(),
+                        workout_id: workout_id.to_string(),
+                        name: "distance".to_string(),
+                        occurrence_date: Some(distance.date.clone()),
+                        start: None,
+                        end: None,
+                        qty: distance.qty,
+                        units: "miles".to_string(),
+                        recorded_at: recorded_at.clone(),
+                    };
+
+                    metric_records.push(distance);
+                }
+            }
+
+            // HeartRateDaum
+            if workout.heart_rate_data.len() > 0 {
+                for heart_rate_data in &workout.heart_rate_data {
+                    let heart_rate_data = MeasurementRecord {
+                        id: uuid::Uuid::new_v4(),
+                        workout_id: workout_id.to_string(),
+                        name: "heart_rate_data".to_string(),
+                        occurrence_date: Some(heart_rate_data.date.clone()),
+                        start: None,
+                        end: None,
+                        qty: heart_rate_data.avg,
+                        units: "count".to_string(),
+                        recorded_at: recorded_at.clone(),
+                    };
+
+                    metric_records.push(heart_rate_data);
+                }
+            }
+
+            // ActiveEnergy
+            if workout.active_energy.len() > 0 {
+                for active_energy in &workout.active_energy {
+                    let active_energy = MeasurementRecord {
+                        id: uuid::Uuid::new_v4(),
+                        workout_id: workout_id.to_string(),
+                        name: "active_energy".to_string(),
+                        occurrence_date: Some(active_energy.date.clone()),
+                        start: None,
+                        end: None,
+                        qty: active_energy.qty,
+                        units: "calories".to_string(),
+                        recorded_at: recorded_at.clone(),
+                    };
+
+                    metric_records.push(active_energy);
+                }
+            };
+
+            // Humidity // TODO: Add Humidity
+            // let humidity = Humidity {
+            //     qty: 0,
+            //     units: "percent".to_string(),
+            // };
+
+            // Route
+            if workout.route.len() > 0 {
+                let route = workout.route[0].clone();
+                let route_record = RouteRecord {
+                    id: uuid::Uuid::new_v4(),
+                    workout_id: workout_id.to_string(),
+                    lat: route.latitude,
+                    lon: route.longitude,
+                    altitude: route.altitude,
+                    timestamp: route.timestamp,
+                    recorded_at: recorded_at.clone(),
+                };
+                route_records.push(route_record);
+            }
+
+            // Intensity // TODO: Add Intensity
+            // let intensity = Intensity {
+            //     units: "percent".to_string(),
+            //     qty: 0,
+            // };
+
+            // Temperature // TODO: Add Temperature
+            // let temperature = Temperature {
+            //     qty: 0,
+            //     units: "celsius".to_string(),
+            // };
+
+            // Distance // TODO: Add Distance
+            // let distance = Distance {
+            //     qty: 0,
+            //     units: "miles".to_string(),
+            // };
+
+            // ElevationUp // TODO: Add ElevationUp
+            // let elevation_up = ElevationUp {
+            //     units: "meters".to_string(),
+            //     qty: 0,
+            // };
+
+            // Metric // TODO: Add Metric
+            // let metric = Metric {
+            //     data: Vec::new(),
+            //     name: "metric".to_string(),
+            //     units: "units".to_string(),
+            // };
+        });
+        // println!("metrics: {:#?}", metric_records);
+        // println!("workout_records: {:#?}", workout_records);
+        // println!("route_records: {:#?}", route_records);
+
+        Ok(AppleHealthDataRecord {
+            id: uuid::Uuid::new_v4(),
+            workouts: workout_records,
+            metrics: metric_records,
+            recorded_at: chrono::Utc::now().to_rfc3339(),
+        })
+    }
+}
+
+#[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct AppleHealthData {
     pub workouts: Vec<Workout>,
     pub ecg: Vec<Value>,
     pub metrics: Vec<Metric>,
@@ -161,6 +273,14 @@ pub struct Data {
 
 #[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Workout {
+    pub name: String,
+    pub intensity: Intensity,
+    pub duration: f64,
+    pub location: String,
+    pub start: String,
+    pub end: String,
+    pub temperature: Temperature,
+    pub distance: Option<Distance>,
     #[serde(rename = "stepCount")]
     pub step_count: Vec<StepCount>,
     #[serde(rename = "heartRateRecovery")]
@@ -172,19 +292,11 @@ pub struct Workout {
     pub heart_rate_data: Vec<HeartRateDaum>,
     #[serde(rename = "elevationUp")]
     pub elevation_up: Option<ElevationUp>,
-    pub name: String,
-    pub end: String,
     #[serde(rename = "activeEnergy")]
     pub active_energy: Vec<ActiveEnergy>,
     pub humidity: Humidity,
     #[serde(default)]
     pub route: Vec<Route>,
-    pub intensity: Intensity,
-    pub duration: f64,
-    pub location: String,
-    pub start: String,
-    pub temperature: Temperature,
-    pub distance: Option<Distance>,
 }
 
 enum ActivityWrapper {
@@ -327,4 +439,83 @@ pub struct Daum {
     pub avg: Option<f64>,
     #[serde(rename = "Min")]
     pub min: Option<f64>,
+}
+
+/*
+#################################################
+# Database Models
+#################################################
+*/
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct AppleHealthDataRecord {
+    pub id: uuid::Uuid,
+    pub workouts: Vec<WorkoutRecord>,
+    pub metrics: Vec<MeasurementRecord>,
+    pub recorded_at: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct WorkoutRecord {
+    pub id: uuid::Uuid,
+    pub name: String,
+    pub start: String,
+    pub end: String,
+    pub recorded_at: String,
+    pub intensity: Intensity,
+    pub duration: f64,
+    pub location: String,
+    // pub measurement_id: String,
+    // pub heart_rate_data_id: String,
+    // pub heart_rate_recovery_id: String,
+    // pub route_id: String,
+    // pub elevation_id: String,
+    // pub recorded_at: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct MeasurementRecord {
+    pub id: uuid::Uuid,
+    pub workout_id: String,
+    pub name: String,
+    pub occurrence_date: Option<String>,
+    pub start: Option<String>,
+    pub end: Option<String>,
+    pub qty: f64,
+    pub units: String,
+    pub recorded_at: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct HeartRateRecoveryRecord {
+    pub id: uuid::Uuid,
+    pub workout_id: String,
+    pub date: String,
+    pub recorded_at: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct RouteRecord {
+    pub id: uuid::Uuid,
+    pub workout_id: String,
+    pub lat: f64,
+    pub lon: f64,
+    pub altitude: f64,
+    pub timestamp: String,
+    pub recorded_at: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct HeartRateDateRecord {
+    pub id: uuid::Uuid,
+    pub workout_id: String,
+    pub date: String,
+    pub recorded_at: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ElevationRecord {
+    pub id: uuid::Uuid,
+    pub workout_id: String,
+    pub recorded_at: String,
 }
